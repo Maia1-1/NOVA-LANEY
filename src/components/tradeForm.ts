@@ -1,6 +1,6 @@
 
 import {
-  calculateGrossProfit,
+  calculateInstrumentGrossProfit,
   calculateNetProfit,
   calculateResult
 } from '../services/calculations';
@@ -8,35 +8,30 @@ import {
 import { addTrade } from '../services/storage';
 import type { Trade } from '../types';
 
-// Instrumentos habilitados en NOVA LANEY
-const TRADING_INSTRUMENTS = [
-  {
-    category: 'Forex - Pares principales',
-    instruments: [
-      { value: 'EURUSD', label: 'EUR/USD' },
-      { value: 'GBPUSD', label: 'GBP/USD' },
-      { value: 'USDJPY', label: 'USD/JPY' }
-    ]
-  },
-  {
-    category: 'Metales',
-    instruments: [
-      { value: 'XAUUSD', label: 'XAU/USD - Oro' }
-    ]
-  }
-];
+import {
+  TRADING_INSTRUMENTS,
+  getInstrument
+} from '../data/instruments';
 
 // Mostrar el formulario de registro
 export function renderTradeForm(): string {
-  const instrumentOptions = TRADING_INSTRUMENTS.map(group => `
-    <optgroup label="${group.category}">
-      ${group.instruments.map(instrument => `
-        <option value="${instrument.value}">
-          ${instrument.label}
-        </option>
-      `).join('')}
-    </optgroup>
-  `).join('');
+  const categories = ['Forex', 'Metales'] as const;
+
+  const instrumentOptions = categories.map(category => {
+    const instruments = TRADING_INSTRUMENTS.filter(
+      instrument => instrument.category === category
+    );
+
+    return `
+      <optgroup label="${category}">
+        ${instruments.map(instrument => `
+          <option value="${instrument.symbol}">
+            ${instrument.displayName}
+          </option>
+        `).join('')}
+      </optgroup>
+    `;
+  }).join('');
 
   return `
     <section class="panel trade-form-panel">
@@ -130,6 +125,39 @@ export function renderTradeForm(): string {
           </div>
 
           <div class="form-group">
+            <label for="trade-contract">Tamaño del contrato</label>
+            <input
+              type="number"
+              id="trade-contract"
+              min="0.00001"
+              step="any"
+              placeholder="Consultar especificaciones"
+              required
+            >
+          </div>
+
+          <div class="form-group">
+            <label for="trade-conversion">Conversión a USD</label>
+            <input
+              type="number"
+              id="trade-conversion"
+              min="0.00000001"
+              step="any"
+              placeholder="Consultar conversión"
+              required
+            >
+          </div>
+
+          <div class="form-group">
+            <label for="trade-currency">Moneda de beneficio</label>
+            <select id="trade-currency" required>
+              <option value="">Seleccionar moneda</option>
+              <option value="USD">USD</option>
+              <option value="JPY">JPY</option>
+            </select>
+          </div>
+
+          <div class="form-group">
             <label for="trade-commission">Comisión (USD)</label>
             <input
               type="number"
@@ -165,7 +193,8 @@ export function renderTradeForm(): string {
         </div>
 
         <div class="trade-preview" id="trade-preview">
-          El resultado se calculará al registrar la operación.
+          El resultado se calculará utilizando las especificaciones ingresadas.
+          Verifica los datos con tu bróker.
         </div>
 
         <button type="submit" class="primary-button">
@@ -183,7 +212,6 @@ export function setupTradeForm(): void {
 
   if (!form) return;
 
-  // Establecer la fecha actual
   const dateInput = document.querySelector<HTMLInputElement>(
     '#trade-date'
   );
@@ -192,7 +220,7 @@ export function setupTradeForm(): void {
     dateInput.value = new Date().toLocaleDateString('en-CA');
   }
 
-  form.addEventListener('submit', (event) => {
+  form.addEventListener('submit', event => {
     event.preventDefault();
 
     const date = getValue('trade-date');
@@ -207,91 +235,137 @@ export function setupTradeForm(): void {
     const quantity = getNumber('trade-quantity');
     const stopLoss = getNumber('trade-stop');
     const takeProfit = getNumber('trade-target');
+    const contractSize = getNumber('trade-contract');
+    const quoteToUSD = getNumber('trade-conversion');
+    const profitCurrency = getValue('trade-currency');
     const commission = getNumber('trade-commission');
     const riskAmount = getNumber('trade-risk');
     const notes = getValue('trade-notes');
 
+    const instrument = getInstrument(asset);
+
+    if (!instrument) {
+      alert('Selecciona un instrumento válido del catálogo.');
+      return;
+    }
+
     if (
       !date ||
-      !asset ||
+      !profitCurrency ||
       entryPrice <= 0 ||
       exitPrice <= 0 ||
       quantity < 0.01 ||
       stopLoss <= 0 ||
       takeProfit <= 0 ||
+      contractSize <= 0 ||
+      quoteToUSD <= 0 ||
       commission < 0 ||
       riskAmount < 0
     ) {
-      alert('Verifica los datos ingresados.');
+      alert('Verifica los datos ingresados y las especificaciones del instrumento.');
       return;
     }
 
-    // Calcular ganancia o pérdida
-    const grossProfit = calculateGrossProfit(
-      direction,
-      entryPrice,
-      exitPrice,
-      quantity
-    );
-
-    const profitLoss = calculateNetProfit(
-      grossProfit,
-      commission
-    );
-
-    const result = calculateResult(profitLoss);
-
-    // Crear el registro
-    const trade: Trade = {
-      id: Date.now(),
-      date,
-      asset,
-      direction,
-      entryPrice,
-      exitPrice,
-      quantity,
-      stopLoss,
-      takeProfit,
-      riskAmount,
-      commission,
-      profitLoss,
-      result,
-      notes
-    };
-
-    // Guardar en almacenamiento local
-    addTrade(trade);
-
-    alert(
-      `Operación guardada correctamente.\n\n` +
-      `Instrumento: ${asset}\n` +
-      `Resultado: ${result}\n` +
-      `Ganancia/Pérdida: ${profitLoss.toFixed(2)} USD`
-    );
-
-    form.reset();
-
-    if (dateInput) {
-      dateInput.value = new Date().toLocaleDateString('en-CA');
+    // Comprobar que los niveles de protección tengan sentido
+    if (
+      (direction === 'Compra' && stopLoss >= entryPrice) ||
+      (direction === 'Compra' && takeProfit <= entryPrice) ||
+      (direction === 'Venta' && stopLoss <= entryPrice) ||
+      (direction === 'Venta' && takeProfit >= entryPrice)
+    ) {
+      alert(
+        'Los niveles de Stop Loss y Take Profit no corresponden a la dirección seleccionada.'
+      );
+      return;
     }
 
-    const quantityInput = document.querySelector<HTMLInputElement>(
-      '#trade-quantity'
-    );
+    // Verificar la moneda de beneficio del instrumento
+    if (profitCurrency !== instrument.quoteCurrency) {
+      alert(
+        `La moneda de beneficio esperada para ${instrument.displayName} es ${instrument.quoteCurrency}.`
+      );
+      return;
+    }
 
-    if (quantityInput) quantityInput.value = '0.01';
+    try {
+      const grossProfit = calculateInstrumentGrossProfit(
+        direction,
+        entryPrice,
+        exitPrice,
+        quantity,
+        {
+          contractSize,
+          quoteToUSD,
+          profitCurrency
+        }
+      );
 
-    const commissionInput = document.querySelector<HTMLInputElement>(
-      '#trade-commission'
-    );
+      const profitLoss = calculateNetProfit(
+        grossProfit,
+        commission
+      );
 
-    if (commissionInput) commissionInput.value = '0';
+      const result = calculateResult(profitLoss);
 
-    const riskInput = document.querySelector<HTMLInputElement>(
-      '#trade-risk'
-    );
+      const trade: Trade = {
+        id: Date.now(),
+        date,
+        asset,
+        direction,
+        entryPrice,
+        exitPrice,
+        quantity,
+        stopLoss,
+        takeProfit,
+        riskAmount,
+        contractSize,
+        quoteToUSD,
+        profitCurrency,
+        commission,
+        profitLoss,
+        result,
+        notes
+      };
 
-    if (riskInput) riskInput.value = '0';
+      addTrade(trade);
+
+      alert(
+        `Operación guardada correctamente.\n\n` +
+        `Instrumento: ${instrument.displayName}\n` +
+        `Resultado: ${result}\n` +
+        `Ganancia/Pérdida estimada: ${profitLoss.toFixed(2)} USD`
+      );
+
+      form.reset();
+
+      if (dateInput) {
+        dateInput.value = new Date().toLocaleDateString('en-CA');
+      }
+
+      const quantityInput = document.querySelector<HTMLInputElement>(
+        '#trade-quantity'
+      );
+
+      if (quantityInput) quantityInput.value = '0.01';
+
+      const commissionInput = document.querySelector<HTMLInputElement>(
+        '#trade-commission'
+      );
+
+      if (commissionInput) commissionInput.value = '0';
+
+      const riskInput = document.querySelector<HTMLInputElement>(
+        '#trade-risk'
+      );
+
+      if (riskInput) riskInput.value = '0';
+
+    } catch (error) {
+      console.error('Error al calcular la operación:', error);
+      alert(
+        'No se pudo calcular la operación. Verifica las especificaciones ingresadas.'
+      );
+    }
   });
 }
 
@@ -310,4 +384,3 @@ function getValue(id: string): string {
 function getNumber(id: string): number {
   return Number(getValue(id));
 }
-

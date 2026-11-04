@@ -1,6 +1,54 @@
-import type { Trade, TradingStatistics } from '../types';
 
-// Calcular la ganancia o pérdida bruta
+import type {
+  Trade,
+  TradingStatistics
+} from '../types';
+
+// Especificaciones necesarias para calcular un instrumento
+export interface InstrumentCalculationSpec {
+  contractSize: number;
+  quoteToUSD: number;
+  profitCurrency: string;
+}
+
+// Calcular la ganancia o pérdida bruta con especificaciones
+export function calculateInstrumentGrossProfit(
+  direction: 'Compra' | 'Venta',
+  entryPrice: number,
+  exitPrice: number,
+  quantity: number,
+  spec: InstrumentCalculationSpec
+): number {
+  if (
+    !Number.isFinite(entryPrice) ||
+    !Number.isFinite(exitPrice) ||
+    !Number.isFinite(quantity) ||
+    !Number.isFinite(spec.contractSize) ||
+    !Number.isFinite(spec.quoteToUSD) ||
+    entryPrice <= 0 ||
+    exitPrice <= 0 ||
+    quantity <= 0 ||
+    spec.contractSize <= 0 ||
+    spec.quoteToUSD <= 0
+  ) {
+    throw new Error(
+      'Los datos del instrumento no son válidos.'
+    );
+  }
+
+  const priceDifference = direction === 'Compra'
+    ? exitPrice - entryPrice
+    : entryPrice - exitPrice;
+
+  const profitInQuoteCurrency =
+    priceDifference * quantity * spec.contractSize;
+
+  return profitInQuoteCurrency * spec.quoteToUSD;
+}
+
+// Función provisional para mantener compatibilidad
+// con el formulario anterior.
+// NO utilizar para calcular operaciones reales.
 export function calculateGrossProfit(
   direction: 'Compra' | 'Venta',
   entryPrice: number,
@@ -19,10 +67,18 @@ export function calculateNetProfit(
   grossProfit: number,
   commission: number
 ): number {
+  if (
+    !Number.isFinite(grossProfit) ||
+    !Number.isFinite(commission) ||
+    commission < 0
+  ) {
+    throw new Error('Los valores financieros no son válidos.');
+  }
+
   return grossProfit - commission;
 }
 
-// Determinar automáticamente el resultado de una operación
+// Determinar automáticamente el resultado
 export function calculateResult(
   profitLoss: number
 ): 'Ganadora' | 'Perdedora' | 'Breakeven' {
@@ -121,7 +177,6 @@ export function calculateMaxDrawdown(
 
   for (const trade of orderedTrades) {
     balance += trade.profitLoss;
-
     peak = Math.max(peak, balance);
 
     if (peak > 0) {

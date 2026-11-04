@@ -32,6 +32,11 @@ import {
   calculateExpectancy
 } from './services/calculations';
 
+import {
+  getBackendStatus,
+  getBackendInstruments
+} from './services/api';
+
 import type { Trade } from './types';
 
 // Formatear valores monetarios
@@ -71,7 +76,6 @@ function getRecentTrades(): Trade[] {
 function renderDashboard(): string {
   const trades = getTrades();
   const account = getAccount();
-
   const statistics = calculateStatistics(trades);
 
   const balance = calculateBalance(
@@ -316,9 +320,7 @@ function renderStatistics(): string {
 
       <div class="summary-item">
         <span>Drawdown máximo</span>
-        <strong>
-          ${calculateMaxDrawdown(account.initialCapital, trades).toFixed(2)}%
-        </strong>
+        <strong>${calculateMaxDrawdown(account.initialCapital, trades).toFixed(2)}%</strong>
       </div>
 
       <div class="summary-item">
@@ -478,9 +480,9 @@ app.innerHTML = `
           <h1 id="page-title">Dashboard</h1>
         </div>
 
-        <div class="topbar-status">
+        <div class="topbar-status" id="backend-status">
           <span class="status-indicator"></span>
-          Sistema en desarrollo
+          Comprobando backend...
         </div>
       </header>
 
@@ -515,3 +517,38 @@ app.addEventListener('click', event => {
 
 // Abrir el dashboard al iniciar
 renderView('dashboard');
+
+// Comprobar la conexión con el backend
+async function checkBackendConnection(): Promise<void> {
+  const statusElement = document.querySelector<HTMLElement>(
+    '#backend-status'
+  );
+
+  if (!statusElement) return;
+
+  try {
+    const status = await getBackendStatus();
+    const instruments = await getBackendInstruments();
+
+    statusElement.innerHTML = `
+      <span class="status-indicator"></span>
+      Backend conectado · ${instruments.length} instrumentos
+    `;
+
+    statusElement.title =
+      `${status.system} - ${status.status}`;
+
+    console.log('Estado del backend:', status);
+    console.log('Instrumentos recibidos:', instruments);
+
+  } catch (error) {
+    statusElement.textContent = 'Backend desconectado';
+
+    console.error(
+      'Error de conexión con NOVA LANEY:',
+      error
+    );
+  }
+}
+
+checkBackendConnection();

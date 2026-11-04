@@ -1,3 +1,4 @@
+
 // Modelo que representa una operación de trading
 export interface Trade {
   id: number;
@@ -16,6 +17,12 @@ export interface Trade {
   stopLoss: number;
   takeProfit: number;
   riskAmount: number;
+
+  // Especificaciones del instrumento
+  // Se obtendrán de MetaTrader 5 o del bróker
+  contractSize?: number;
+  quoteToUSD?: number;
+  profitCurrency?: string;
 
   // Costos y resultado financiero
   commission: number;
